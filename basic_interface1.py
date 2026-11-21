@@ -7,8 +7,10 @@ not for clinical use.
 
 from __future__ import annotations
 
+import json
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from pathlib import Path
 
 
 def _as_finite_signal(signal: Sequence[float], name: str = "signal") -> list[float]:
@@ -231,6 +233,47 @@ def decode_population_direction(
     return math.atan2(y, x)
 
 
+def save_ai_demo_graph(
+    model: Callable[[str], str],
+    output_path: str | Path = "generated_demo.png",
+    *,
+    sample_count: int = 64,
+) -> Path:
+    """Generate an AI-assisted demo and save its inputs and outputs as a PNG."""
+    from ai_integ import save_generated_demo_plot
+
+    return save_generated_demo_plot(
+        model, output_path=output_path, sample_count=sample_count
+    )
+
+
+def _synthetic_demo_model(_: str) -> str:
+    """Provide deterministic synthetic inputs for the runnable example."""
+    sample_indices = range(64)
+    return json.dumps(
+        {
+            "sampling_rate_hz": 100.0,
+            "channels": [
+                [
+                    3.0 + 20.0 * math.sin(2.0 * math.pi * index / 16.0)
+                    for index in sample_indices
+                ],
+                [
+                    -2.0 + 12.0 * math.cos(2.0 * math.pi * index / 24.0)
+                    for index in sample_indices
+                ],
+            ],
+            "input_current_nA": [
+                1.2 + 0.5 * math.sin(2.0 * math.pi * index / 20.0)
+                for index in sample_indices
+            ],
+            "threshold": 8.0,
+            "window_size": 16,
+            "step_size": 8,
+        }
+    )
+
+
 def main() -> None:
     """Run a small synthetic example through each starter utility."""
     sampling_rate_hz = 100.0
@@ -268,6 +311,8 @@ def main() -> None:
     print(f"Threshold-event firing rate: {rate:.1f} Hz")
     print(f"LIF voltage samples: {len(voltage_trace)}, spike indices: {lif_spikes}")
     print(f"Decoded population direction: {decoded_direction_rad:.3f} rad")
+    graph_path = save_ai_demo_graph(_synthetic_demo_model)
+    print(f"Generated demo graph: {graph_path}")
 
 
 if __name__ == "__main__":

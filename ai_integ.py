@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
 from typing import TypedDict
 
 from basic_interface1 import (
@@ -49,6 +50,22 @@ class LIFParameters(TypedDict):
     threshold_mV: float
     reset_potential_mV: float
     refractory_period_ms: float
+
+
+class GeneratedDemoResult(TypedDict):
+    inputs: DemoInputs
+    dc_removed_sample: list[float]
+    dc_removed_signal: list[float]
+    zscored_sample: list[float]
+    zscored_signal: list[float]
+    window_count: int
+    threshold_crossing_indices: list[int]
+    encoded_spike_count: int
+    lif_spike_indices: list[int]
+    lif_firing_rate_hz: float
+    lif_inter_spike_intervals_ms: list[float]
+    lif_voltage_sample_mV: list[float]
+    lif_voltage_trace: list[float]
 
 
 def _request_json_object(
@@ -164,8 +181,10 @@ def generate_demo_inputs(
     }
 
 
-def run_generated_demo(model: ModelTextGenerator, *, sample_count: int = 64) -> dict[str, object]:
-    """Generate synthetic inputs, run starter analyses, and return compact results."""
+def run_generated_demo(
+    model: ModelTextGenerator, *, sample_count: int = 64
+) -> GeneratedDemoResult:
+    """Generate synthetic inputs and return signal traces and summary results."""
     inputs = generate_demo_inputs(model, sample_count=sample_count)
     channel = inputs["channels"][0]
     centered = remove_dc(channel)
@@ -185,7 +204,9 @@ def run_generated_demo(model: ModelTextGenerator, *, sample_count: int = 64) -> 
     return {
         "inputs": inputs,
         "dc_removed_sample": centered[:10],
+        "dc_removed_signal": centered,
         "zscored_sample": standardized[:10],
+        "zscored_signal": standardized,
         "window_count": len(windows),
         "threshold_crossing_indices": crossing_indices,
         "encoded_spike_count": sum(spike_train),
@@ -193,7 +214,116 @@ def run_generated_demo(model: ModelTextGenerator, *, sample_count: int = 64) -> 
         "lif_firing_rate_hz": firing_rate_hz(lif_spike_times_ms, duration_ms),
         "lif_inter_spike_intervals_ms": inter_spike_intervals(lif_spike_times_ms),
         "lif_voltage_sample_mV": voltage_trace[:10],
+        "lif_voltage_trace": voltage_trace,
     }
+
+
+def save_generated_demo_plot(
+    model: ModelTextGenerator,
+    output_path: str | Path = "generated_demo.png",
+    *,
+    sample_count: int = 64,
+) -> Path:
+    """Save generated demo inputs and computed output traces to a PNG image."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    results = run_generated_demo(model, sample_count=sample_count)
+    inputs = results["inputs"]
+    sampling_rate_hz = inputs["sampling_rate_hz"]
+    sample_times_ms = [
+        index * 1000.0 / sampling_rate_hz
+        for index in range(len(inputs["input_current_nA"]))
+    ]
+
+    figure = Figure(figsize=(13, 10), constrained_layout=True)
+    FigureCanvasAgg(figure)
+    axes = figure.subplots(3, 2)
+    figure.suptitle("Synthetic neuromorphic demo: inputs and outputs")
+
+    channel_axis = axes[0, 0]
+    channel_axis.plot(sample_times_ms, inputs["channels"][0], label="Channel 1")
+    channel_axis.plot(sample_times_ms, inputs["channels"][1], label="Channel 2")
+    channel_axis.set_title("Input EEG channels")
+    channel_axis.set_ylabel("Amplitude (arbitrary units)")
+    channel_axis.legend()
+
+    current_axis = axes[0, 1]
+    current_axis.plot(sample_times_ms, inputs["input_current_nA"], color="tab:orange")
+    current_axis.set_title("Input current")
+    current_axis.set_ylabel("Current (nA)")
+
+    centered_axis = axes[1, 0]
+    centered_signal = results["dc_removed_signal"]
+    centered_axis.plot(sample_times_ms, centered_signal, label="DC removed")
+    centered_axis.axhline(
+        inputs["threshold"], color="tab:red", linestyle="--", label="Threshold"
+    )
+    crossing_indices = results["threshold_crossing_indices"]
+    centered_axis.scatter(
+        [sample_times_ms[index] for index in crossing_indices],
+        [centered_signal[index] for index in crossing_indices],
+        color="tab:red",
+        marker="x",
+        label="Threshold crossings",
+    )
+    centered_axis.set_title("Processed channel")
+    centered_axis.set_ylabel("Amplitude")
+    centered_axis.legend()
+
+    standardized_axis = axes[1, 1]
+    standardized_axis.plot(sample_times_ms, results["zscored_signal"])
+    standardized_axis.set_title("Z-scored channel")
+    standardized_axis.set_ylabel("Standard deviations")
+
+    voltage_axis = axes[2, 0]
+    voltage_trace = results["lif_voltage_trace"]
+    voltage_axis.plot(sample_times_ms, voltage_trace, label="LIF voltage")
+    spike_indices = results["lif_spike_indices"]
+    voltage_axis.scatter(
+        [sample_times_ms[index] for index in spike_indices],
+        [voltage_trace[index] for index in spike_indices],
+        color="tab:red",
+        marker="x",
+        label="LIF spikes",
+    )
+    voltage_axis.set_title("Leaky integrate-and-fire output")
+    voltage_axis.set_xlabel("Time (ms)")
+    voltage_axis.set_ylabel("Voltage (mV)")
+    voltage_axis.legend()
+
+    summary_axis = axes[2, 1]
+    summary_axis.axis("off")
+    intervals = results["lif_inter_spike_intervals_ms"]
+    interval_lines = [f"  {interval:.2f}" for interval in intervals[:6]]
+    if len(intervals) > 6:
+        interval_lines.append(f"  ... ({len(intervals)} intervals total)")
+    interval_text = "\n".join(interval_lines) or "  None"
+    summary_axis.text(
+        0.02,
+        0.98,
+        "\n".join(
+            (
+                "Demo summary",
+                f"Sampling rate: {sampling_rate_hz:g} Hz",
+                f"Window count: {results['window_count']}",
+                f"Threshold crossings: {len(crossing_indices)}",
+                f"Encoded spikes: {results['encoded_spike_count']}",
+                f"LIF spikes: {len(spike_indices)}",
+                f"LIF firing rate: {results['lif_firing_rate_hz']:.2f} Hz",
+                "LIF inter-spike intervals (ms):",
+                interval_text,
+            )
+        ),
+        va="top",
+    )
+
+    path = Path(output_path)
+    if path.suffix.lower() != ".png":
+        raise ValueError("output_path must have a .png extension")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(path, format="png", dpi=150)
+    return path
 
 
 def optimize_lif_parameters(

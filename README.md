@@ -12,13 +12,23 @@ The workspace virtual environment is `.venv`. Activate it in a terminal with:
 source .venv/bin/activate
 ```
 
-The starter module uses only the Python standard library. Its functions are in
-[`basic_interface1.py`](basic_interface1.py). Run its synthetic demonstration
-with:
+Install the dependencies, including the plotting library used by the demo
+graph:
+
+```sh
+python -m pip install -r requirements.txt
+```
+
+The signal-processing functions in [`basic_interface1.py`](basic_interface1.py)
+use only the Python standard library. Run their synthetic demonstration with:
 
 ```sh
 python basic_interface1.py
 ```
+
+The script also saves a reproducible graph of synthetic demo inputs and outputs
+as `generated_demo.png` in the current directory. No AI service or credentials
+are required.
 
 ## Starter functions
 
@@ -87,3 +97,13 @@ reports the best among a bounded set of model-proposed candidates; it does not
 guarantee a global optimum. Validate model output and use synthetic or
 de-identified data. These educational examples are not for clinical use or
 controlling a device.
+
+To save a graph of the generated inputs, processed signals, neuron voltage,
+and summary metrics, call the wrapper in `basic_interface1.py` with the same
+model adapter. It returns the PNG path and defaults to `generated_demo.png`:
+
+```python
+from basic_interface1 import save_ai_demo_graph
+
+image_path = save_ai_demo_graph(ask_model, output_path="demo_results.png")
+```
